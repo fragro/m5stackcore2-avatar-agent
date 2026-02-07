@@ -1,0 +1,33 @@
+# PlatformIO
+.pio/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+**/venv/
+
+# Piper TTS (x86_64 binaries + espeak data)
+server/piper/
+
+# Voice models (large ONNX files)
+server/voices/*.onnx
+server/voices/*.onnx.json
+
+# Shared libraries
+*.dylib
+*.so
+*.dSYM/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
