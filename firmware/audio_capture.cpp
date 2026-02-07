@@ -1,4 +1,5 @@
 #include "audio_capture.h"
+#include "wake_detect.h"
 #include "config.h"
 #include <M5Unified.h>
 
@@ -75,6 +76,30 @@ void audio_capture_start() {
     Serial.println("[MIC] Recording started");
 }
 
+void audio_capture_start_from_wake() {
+    if (!wav_buffer) return;
+
+    pcm_offset = 0;
+    voice_detected = false;  // Let VAD detect the actual command speech naturally
+    silence_start = 0;
+    current_level = 0.0f;
+    recording = true;
+    record_start_time = millis();
+
+    // Mic is ALREADY running from wake detection — no I2S switch needed.
+    // Mark wake detector as suspended (we're taking over the mic)
+    wake_detect_suspend();
+
+    // Note: we intentionally do NOT copy the wake circular buffer here.
+    // The buffer contains the wake trigger sound + ambient noise, which
+    // isn't useful for STT. The user's actual command comes AFTER the
+    // wake word, so we start recording fresh from this point.
+    // The circular buffer infrastructure remains for Phase 2 where a real
+    // wake word model may need it for context.
+
+    Serial.println("[MIC] Recording started (from wake, fresh buffer)");
+}
+
 void audio_capture_stop() {
     if (!recording) return;
     recording = false;
@@ -82,9 +107,9 @@ void audio_capture_stop() {
     // Wait for any in-progress recording to finish
     while (M5.Mic.isRecording()) { delay(1); }
 
-    // Stop mic, restart speaker
+    // Stop mic only — speaker will be restarted by whoever needs it next
+    // (audio_playback or wake_detect_stop). This avoids I2S double-init errors.
     M5.Mic.end();
-    M5.Speaker.begin();
 
     // Write WAV header with actual data size
     write_wav_header(wav_buffer, pcm_offset);

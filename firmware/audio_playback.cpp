@@ -26,6 +26,9 @@ void audio_playback_play(const uint8_t* wav_data, size_t wav_len) {
     play_pos = 0;
     playing = true;
 
+    // Ensure speaker is initialized (mic may have been using the I2S bus)
+    M5.Speaker.begin();
+
     // Start playback using M5.Speaker
     M5.Speaker.playRaw(play_pcm, play_total_samples, wav_sample_rate, false, 1, 0);
 

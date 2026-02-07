@@ -4,3 +4,5 @@ faster-whisper>=1.0
 ollama>=0.3
 python-multipart>=0.0.6
 numpy>=1.26
+sqlite-vec>=0.1.1
+pysqlite3>=0.5.4

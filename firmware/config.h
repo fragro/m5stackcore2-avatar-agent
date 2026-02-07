@@ -20,6 +20,10 @@
 #define VAD_THRESHOLD     500   // Amplitude threshold for voice detection
 #define VAD_SILENCE_MS    800   // Silence duration to stop recording
 
+// Wake word detection settings
+#define WAKE_BUF_SAMPLES  16000  // 1 second circular buffer at 16kHz
+#define WAKE_FRAME_SAMPLES 480   // 30ms frame for WakeNet (480 samples at 16kHz)
+
 // Display settings
 #define SCREEN_WIDTH      320
 #define SCREEN_HEIGHT     240
