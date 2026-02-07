@@ -6,7 +6,8 @@
  * Server runs Whisper (STT), Ollama (LLM), and Piper (TTS) locally.
  *
  * Controls:
- *   BtnA (left)   = Hold to talk
+ *   Wake word     = Say "Lo-Bug" to start recording (hands-free)
+ *   BtnA (left)   = Manual talk override
  *   BtnB (center) = Type message (keyboard)
  *   BtnC (right)  = Menu / close keyboard
  */
@@ -18,6 +19,7 @@
 #include "display_ui.h"
 #include "audio_capture.h"
 #include "audio_playback.h"
+#include "wake_detect.h"
 #include "sensors.h"
 
 using namespace m5avatar;
@@ -26,6 +28,7 @@ enum AppState {
     STATE_INIT,
     STATE_CONNECTING,
     STATE_IDLE,
+    STATE_WAKE_LISTENING,
     STATE_RECORDING,
     STATE_SENDING_AUDIO,
     STATE_SENDING_TEXT,
@@ -73,6 +76,7 @@ void setup() {
 
     audio_capture_init();
     audio_playback_init();
+    wake_detect_init();
     sensors_init();
 
     transition(STATE_CONNECTING);
@@ -82,18 +86,19 @@ void loop() {
     M5.update();
 
     switch (state) {
-        case STATE_CONNECTING:  handle_connecting();     break;
-        case STATE_IDLE:        handle_idle();           break;
-        case STATE_RECORDING:   handle_recording();      break;
-        case STATE_SENDING_AUDIO: handle_sending_audio(); break;
-        case STATE_SENDING_TEXT:  handle_sending_text();  break;
-        case STATE_PLAYING_RESPONSE: handle_playing();   break;
-        case STATE_KEYBOARD:    handle_keyboard();       break;
+        case STATE_CONNECTING:       handle_connecting();      break;
+        case STATE_IDLE:             handle_idle();            break;
+        case STATE_WAKE_LISTENING:   handle_wake_listening();  break;
+        case STATE_RECORDING:        handle_recording();       break;
+        case STATE_SENDING_AUDIO:    handle_sending_audio();   break;
+        case STATE_SENDING_TEXT:     handle_sending_text();    break;
+        case STATE_PLAYING_RESPONSE: handle_playing();         break;
+        case STATE_KEYBOARD:         handle_keyboard();        break;
         default: break;
     }
 
     // Periodic tasks
-    if (state == STATE_IDLE || state == STATE_KEYBOARD) {
+    if (state == STATE_IDLE || state == STATE_WAKE_LISTENING || state == STATE_KEYBOARD) {
         handle_sensors();
         handle_health_check();
     }
@@ -123,57 +128,98 @@ void handle_connecting() {
         display_set_speech("Connected!");
         delay(1500);
         display_set_speech("");
-        display_set_expression(Expression::Neutral);
     } else {
         display_set_expression(Expression::Sad);
         display_set_speech("No server found");
         delay(2000);
         display_set_speech("");
-        display_set_expression(Expression::Sleepy);
     }
 
-    transition(STATE_IDLE);
+    // Start wake word listening
+    display_set_expression(Expression::Sleepy);
+    wake_detect_start();
+    transition(STATE_WAKE_LISTENING);
 }
 
 void handle_idle() {
+    // Idle is a fallback state — immediately start wake listening
+    display_set_expression(Expression::Sleepy);
+    wake_detect_start();
+    transition(STATE_WAKE_LISTENING);
+}
+
+void handle_wake_listening() {
+    // Animate the sleepy face (periodic blink)
+    display_wake_listening_update();
+
+    // Feed audio to wake detector
+    bool wake_detected = wake_detect_feed();
+
+    // Check buttons (manual override)
     int btn = display_check_buttons();
 
-    switch (btn) {
-        case 1: // BtnA = Talk
-            if (!server_connected) {
-                display_set_expression(Expression::Sad);
-                display_set_speech("No server!");
-                delay(1000);
-                display_set_speech("");
-                display_set_expression(Expression::Neutral);
-                break;
-            }
-            display_set_expression(Expression::Happy);
-            display_set_speech("Listening...");
-            audio_capture_start();
-            transition(STATE_RECORDING);
-            break;
-
-        case 2: // BtnB = Type
-            if (!server_connected) {
-                display_set_expression(Expression::Sad);
-                display_set_speech("No server!");
-                delay(1000);
-                display_set_speech("");
-                display_set_expression(Expression::Neutral);
-                break;
-            }
-            display_keyboard_open();
-            transition(STATE_KEYBOARD);
-            break;
-
-        case 3: // BtnC = Menu
-            display_set_expression(Expression::Happy);
-            display_set_speech("I'm your local AI!");
-            delay(2000);
+    if (btn == 1) {
+        // BtnA = manual Talk override
+        if (!server_connected) {
+            display_set_expression(Expression::Sad);
+            display_set_speech("No server!");
+            delay(1000);
             display_set_speech("");
-            display_set_expression(Expression::Neutral);
-            break;
+            display_set_expression(Expression::Sleepy);
+            return;
+        }
+        wake_detect_stop();
+        display_set_expression(Expression::Happy);
+        display_set_speech("Listening...");
+        audio_capture_start();
+        transition(STATE_RECORDING);
+        return;
+    }
+
+    if (btn == 2) {
+        // BtnB = Type
+        if (!server_connected) {
+            display_set_expression(Expression::Sad);
+            display_set_speech("No server!");
+            delay(1000);
+            display_set_speech("");
+            display_set_expression(Expression::Sleepy);
+            return;
+        }
+        wake_detect_stop();
+        display_keyboard_open();
+        transition(STATE_KEYBOARD);
+        return;
+    }
+
+    if (btn == 3) {
+        // BtnC = Menu
+        display_set_expression(Expression::Happy);
+        display_set_speech("I'm your local AI!");
+        delay(2000);
+        display_set_speech("");
+        display_set_expression(Expression::Sleepy);
+        return;
+    }
+
+    // Wake word detected!
+    if (wake_detected) {
+        if (!server_connected) {
+            display_set_expression(Expression::Sad);
+            display_set_speech("No server!");
+            delay(1000);
+            display_set_speech("");
+            display_set_expression(Expression::Sleepy);
+            return;
+        }
+
+        // Brief happy flash to acknowledge detection
+        display_set_expression(Expression::Happy);
+        display_set_speech("Listening...");
+
+        // Seamless transition: mic already running, copy wake buffer
+        audio_capture_start_from_wake();
+        transition(STATE_RECORDING);
     }
 }
 
@@ -202,30 +248,56 @@ void handle_sending_audio() {
     const uint8_t* wav = audio_capture_get_wav();
     size_t wav_len = audio_capture_get_wav_size();
 
+    // Empty WAV capture — go straight back to sleep silently
     if (wav_len <= 44) {
-        display_set_expression(Expression::Sad);
-        display_set_speech("Didn't hear anything");
-        delay(1500);
         display_set_speech("");
-        display_set_expression(Expression::Neutral);
-        transition(STATE_IDLE);
+        display_set_expression(Expression::Sleepy);
+        wake_detect_start();
+        transition(STATE_WAKE_LISTENING);
         return;
     }
 
-    String transcription, response;
+    String transcription, response, action;
     free_response_audio();
 
     bool ok = network_chat_audio(wav, wav_len, transcription, response,
-                                  &response_audio, &response_audio_len);
+                                  action, &response_audio, &response_audio_len);
 
     if (ok) {
         Serial.printf("[APP] You said: %s\n", transcription.c_str());
-        Serial.printf("[APP] Response: %s\n", response.c_str());
+        Serial.printf("[APP] Response: %s (action=%s)\n", response.c_str(), action.c_str());
 
+        if (action == "ignore") {
+            // Brief expression flicker — acknowledge we heard something, then sleep
+            display_set_expression(Expression::Neutral);
+            delay(150);
+            display_set_expression(Expression::Sleepy);
+            delay(150);
+            display_set_speech("");
+            wake_detect_start();
+            transition(STATE_WAKE_LISTENING);
+            return;
+        }
+
+        if (action == "react") {
+            // Show text on screen briefly, no audio
+            display_set_expression(Expression::Neutral);
+            String short_resp = response;
+            if (short_resp.length() > 60) {
+                short_resp = short_resp.substring(0, 57) + "...";
+            }
+            display_set_speech(short_resp.c_str());
+            delay(1500);
+            display_set_speech("");
+            display_set_expression(Expression::Sleepy);
+            wake_detect_start();
+            transition(STATE_WAKE_LISTENING);
+            return;
+        }
+
+        // action == "respond" — full pipeline
         display_set_expression(Expression::Happy);
 
-        // Show response text briefly
-        // Truncate for speech balloon
         String short_resp = response;
         if (short_resp.length() > 60) {
             short_resp = short_resp.substring(0, 57) + "...";
@@ -241,22 +313,24 @@ void handle_sending_audio() {
 
         delay(3000);
         display_set_speech("");
-        display_set_expression(Expression::Neutral);
     } else {
         display_set_expression(Expression::Sad);
         display_set_speech("Error!");
         delay(1500);
         display_set_speech("");
-        display_set_expression(Expression::Neutral);
     }
 
-    transition(STATE_IDLE);
+    display_set_expression(Expression::Sleepy);
+    wake_detect_start();
+    transition(STATE_WAKE_LISTENING);
 }
 
 void handle_sending_text() {
     // This state is entered from keyboard after send
     // The actual network call happens inline in handle_keyboard
-    transition(STATE_IDLE);
+    display_set_expression(Expression::Sleepy);
+    wake_detect_start();
+    transition(STATE_WAKE_LISTENING);
 }
 
 void handle_playing() {
@@ -265,12 +339,13 @@ void handle_playing() {
         float level = audio_playback_get_level();
         display_set_mouth(level);
     } else {
-        // Playback finished
+        // Playback finished → resume wake listening
         display_set_mouth(0);
         display_set_speech("");
-        display_set_expression(Expression::Neutral);
+        display_set_expression(Expression::Sleepy);
         free_response_audio();
-        transition(STATE_IDLE);
+        wake_detect_start();
+        transition(STATE_WAKE_LISTENING);
     }
 
     // Allow interrupting with any button
@@ -279,9 +354,10 @@ void handle_playing() {
         audio_playback_stop();
         display_set_mouth(0);
         display_set_speech("");
-        display_set_expression(Expression::Neutral);
+        display_set_expression(Expression::Sleepy);
         free_response_audio();
-        transition(STATE_IDLE);
+        wake_detect_start();
+        transition(STATE_WAKE_LISTENING);
     }
 }
 
@@ -311,15 +387,18 @@ void handle_keyboard() {
         }
 
         display_set_speech("");
-        display_set_expression(Expression::Neutral);
-        transition(STATE_IDLE);
+        display_set_expression(Expression::Sleepy);
+        wake_detect_start();
+        transition(STATE_WAKE_LISTENING);
         return;
     }
 
     // BtnC closes keyboard
     if (M5.BtnC.wasPressed()) {
         display_keyboard_close();
-        transition(STATE_IDLE);
+        display_set_expression(Expression::Sleepy);
+        wake_detect_start();
+        transition(STATE_WAKE_LISTENING);
     }
 }
 

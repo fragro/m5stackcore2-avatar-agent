@@ -17,9 +17,11 @@ bool network_health_check();
 String network_chat_text(const String& text);
 
 /// POST WAV audio to /chat/audio.
-/// Returns true on success, populating transcription, response, and audio output buffer.
+/// Returns true on success, populating transcription, response, action, and audio output buffer.
+/// action will be "respond", "ignore", or "react". Audio is only decoded when action is "respond".
 bool network_chat_audio(const uint8_t* wav_data, size_t wav_len,
                         String& transcription, String& response,
+                        String& action,
                         uint8_t** audio_out, size_t* audio_out_len);
 
 /// POST sensor data to /context/sensors.

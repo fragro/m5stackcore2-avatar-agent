@@ -9,6 +9,11 @@ void audio_capture_init();
 /// Stops the speaker first (shared I2S bus).
 void audio_capture_start();
 
+/// Start recording seamlessly from wake detection state.
+/// Mic is already running — copies buffered wake audio into the
+/// recording buffer so the moment after the wake word is captured.
+void audio_capture_start_from_wake();
+
 /// Stop recording and finalize WAV buffer.
 /// Restarts the speaker after stopping mic.
 void audio_capture_stop();

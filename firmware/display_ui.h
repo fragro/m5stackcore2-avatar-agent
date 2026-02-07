@@ -42,3 +42,7 @@ bool display_keyboard_is_open();
 
 /// Close keyboard and restart avatar.
 void display_keyboard_close();
+
+/// Update wake listening display — subtle periodic blink animation.
+/// Call from loop() while in STATE_WAKE_LISTENING.
+void display_wake_listening_update();

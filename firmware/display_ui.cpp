@@ -30,6 +30,11 @@ static const int KB_PADDING = 2;
 
 static void draw_keyboard();
 
+// Wake listening animation state
+static unsigned long wake_blink_timer = 0;
+static const unsigned long WAKE_BLINK_INTERVAL = 4000;  // Blink every 4 seconds
+static const unsigned long WAKE_BLINK_DURATION = 300;    // Blink lasts 300ms
+
 void display_init() {
     M5.Display.setRotation(1);
 
@@ -183,6 +188,23 @@ bool display_keyboard_is_open() {
 void display_keyboard_close() {
     keyboard_open = false;
     display_avatar_start();
+}
+
+void display_wake_listening_update() {
+    unsigned long now = millis();
+
+    // Periodic blink: briefly switch to Neutral (eyes open) then back to Sleepy
+    if (now - wake_blink_timer >= WAKE_BLINK_INTERVAL) {
+        avatar.setExpression(Expression::Neutral);
+        // Small mouth twitch to show it's alive
+        avatar.setMouthOpenRatio(0.1f);
+    }
+
+    if (now - wake_blink_timer >= WAKE_BLINK_INTERVAL + WAKE_BLINK_DURATION) {
+        avatar.setExpression(Expression::Sleepy);
+        avatar.setMouthOpenRatio(0.0f);
+        wake_blink_timer = now;
+    }
 }
 
 static void draw_keyboard() {

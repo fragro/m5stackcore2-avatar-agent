@@ -6,8 +6,10 @@ import ollama
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "llama3.2:3b"
+DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"
 
 _model_name: str = DEFAULT_MODEL
+_embedding_model: str = DEFAULT_EMBEDDING_MODEL
 
 
 def configure(model: str = DEFAULT_MODEL) -> None:
@@ -15,6 +17,31 @@ def configure(model: str = DEFAULT_MODEL) -> None:
     global _model_name
     _model_name = model
     logger.info("LLM configured to use model: %s", _model_name)
+
+
+def configure_embeddings(model: str = DEFAULT_EMBEDDING_MODEL) -> None:
+    """Set which Ollama model to use for embeddings."""
+    global _embedding_model
+    _embedding_model = model
+    logger.info("Embedding model configured: %s", _embedding_model)
+
+
+def embed(text: str) -> list[float]:
+    """Embed a single text string. Returns a float vector."""
+    response = ollama.embed(model=_embedding_model, input=text)
+    if isinstance(response, dict):
+        return response["embeddings"][0]
+    return response.embeddings[0]
+
+
+def embed_batch(texts: list[str]) -> list[list[float]]:
+    """Embed multiple texts in one call. Returns a list of float vectors."""
+    if not texts:
+        return []
+    response = ollama.embed(model=_embedding_model, input=texts)
+    if isinstance(response, dict):
+        return response["embeddings"]
+    return response.embeddings
 
 
 def check_available() -> bool:

@@ -101,6 +101,7 @@ String network_chat_text(const String& text) {
 
 bool network_chat_audio(const uint8_t* wav_data, size_t wav_len,
                         String& transcription, String& response,
+                        String& action,
                         uint8_t** audio_out, size_t* audio_out_len) {
     HTTPClient http;
     String url = String(SERVER_URL) + "/chat/audio";
@@ -153,24 +154,31 @@ bool network_chat_audio(const uint8_t* wav_data, size_t wav_len,
 
     transcription = doc["transcription"].as<String>();
     response = doc["response"].as<String>();
+    action = doc["action"] | "respond";
 
-    // Decode base64 audio
-    const char* b64 = doc["audio_b64"].as<const char*>();
-    if (b64) {
-        size_t b64_len = strlen(b64);
-        size_t max_decoded = (b64_len * 3) / 4 + 4;
-        *audio_out = (uint8_t*)ps_malloc(max_decoded);
-        if (*audio_out) {
-            *audio_out_len = base64_decode(b64, b64_len, *audio_out);
+    // Only decode base64 audio when action is "respond" (saves PSRAM)
+    if (action == "respond") {
+        const char* b64 = doc["audio_b64"].as<const char*>();
+        if (b64 && strlen(b64) > 0) {
+            size_t b64_len = strlen(b64);
+            size_t max_decoded = (b64_len * 3) / 4 + 4;
+            *audio_out = (uint8_t*)ps_malloc(max_decoded);
+            if (*audio_out) {
+                *audio_out_len = base64_decode(b64, b64_len, *audio_out);
+            } else {
+                *audio_out_len = 0;
+                Serial.println("[NET] Failed to allocate audio decode buffer");
+            }
         } else {
+            *audio_out = nullptr;
             *audio_out_len = 0;
-            Serial.println("[NET] Failed to allocate audio decode buffer");
         }
     } else {
         *audio_out = nullptr;
         *audio_out_len = 0;
     }
 
+    Serial.printf("[NET] action=%s transcription='%s'\n", action.c_str(), transcription.c_str());
     return true;
 }
 
